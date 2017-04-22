@@ -61,42 +61,67 @@ class SQ(object):
     def __init__(self):
         self.sql = ""
 
-    def eq(self, **kwargs):
+    @classmethod
+    def eq(cls, **kwargs):
+        sq = SQ()
         for k in kwargs:
             if isinstance(kwargs[k], int):
-                self.sql = "{}={}".format(k,kwargs[k])
+                sq.sql = "{}={}".format(k,kwargs[k])
             else:
-                self.sql = "{}='{}'".format(k,kwargs[k])
+                sq.sql = "{}='{}'".format(k,kwargs[k])
             # logging.debug("sql {}".format(self.sql))
             break
-        return self
+        return sq
 
     def or_eq(self, **kwargs):
-        for k in kwargs:
-            if isinstance(kwargs[k], int):
-                self.sql += " or {}={}".format(k,kwargs[k])
-            else:
-                self.sql = " or {}='{}'".format(k,kwargs[k])
-            # logging.debug("sql {}".format(self.sql))
-            break
-        return self
+        return self._opt("or","=", **kwargs)
+    
+    def and_eq(self, **kwargs):
+        return self._opt("and","=", **kwargs)
 
-    def more(self, **kwargs):
+    @classmethod
+    def more(cls, **kwargs):
+        sq = SQ()
         for k in kwargs:
             if isinstance(kwargs[k], int):
-                self.sql = "{}>{}".format(k,kwargs[k])
+                sq.sql = "{}>{}".format(k,kwargs[k])
             else:
-                self.sql = "{}>'{}'".format(k,kwargs[k])
+                sq.sql = "{}>'{}'".format(k,kwargs[k])
             # logging.debug("sql {}".format(self.sql))
             break
-        return self
+        return sq
 
     def and_more(self, **kwargs):
+        return self._opt("and",">", **kwargs)
+
+    def or_more(self, **kwargs):
+        return self._opt("or",">", **kwargs)
+
+
+    @classmethod
+    def less(cls, **kwargs):
+        sq = SQ()
         for k in kwargs:
             if isinstance(kwargs[k], int):
-                self.sql += " and {}>{}".format(k,kwargs[k])
+                sq.sql = "{}<{}".format(k,kwargs[k])
             else:
-                self.sql += " and {}>'{}'".format(k,kwargs[k])
+                sq.sql = "{}<'{}'".format(k,kwargs[k])
+            # logging.debug("sql {}".format(self.sql))
+            break
+        return sq
+
+    def or_less(self, **kwargs):
+        return self._opt("or","<", **kwargs)
+    
+    def and_less(self, **kwargs):
+        return self._opt("and","<", **kwargs)
+
+    def _opt(self,relation, op, **kwargs):
+        for k in kwargs:
+            if isinstance(kwargs[k], int):
+                self.sql += " {} {}{}{}".format(relation, k,op,kwargs[k])
+            else:
+                self.sql += " {} {}{}'{}'".format(relation, k,op,kwargs[k])
             # logging.debug("sql {}".format(self.sql))
             break
         return self
