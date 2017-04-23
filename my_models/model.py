@@ -1,9 +1,19 @@
+# coding:utf-8
 import inspect
 import logging
 import my_models.set_logging as set_logging
 
 if not set_logging.ISSET:
     set_logging.set_logger()
+
+import torndb
+db = torndb.Connection("localhost", "test_yzh", user="root", password="yzh123")    
+
+def first_or_none(objs):
+    if objs:
+        return objs[0]
+    return None
+
 
 class Model(object):
     def __init__(self):
@@ -19,24 +29,26 @@ class Model(object):
         sql = "insert into {table_name}({names}) values({values})"
         names = ""
         values = ""
+        true_values = []
         for name, val in table_property:
             if isinstance(val, OneToMany) or isinstance(val, ManyToOne):
                 continue
 
+            if val == None or val == "":
+                continue         
             names += name + ","
-            if isinstance(val, int):
-                values += str(val) + ","
-            else:
-                values += "'{}'".format(val) + ","
+            values += "%s" + ","
+            true_values.append(val)
 
         names = names[:-1]
         values = values[:-1]
 
         pre_exec = PreExec()
         pre_exec.sql = sql.format(table_name=table_name, names=names, values=values)
+        pre_exec.values = true_values
 
         # logging.debug("sql {}".format(sql))
-        return pre_exec.exec()
+        return pre_exec.run()
 
     def update(self):
         """
@@ -45,21 +57,21 @@ class Model(object):
         table_name = self.__class__.__name__
         table_property = self.__dict__.items()
 
-        sql = "update {table_name} set {query} where id={id})"
+        sql = "update {table_name} set {query} where id={id}"
         names = []
         values = []
+        true_values = []
         for name, val in table_property:
             if isinstance(val, OneToMany) or isinstance(val, ManyToOne):
                 continue
             if name=="id":
                 continue
-            if not val:
-                continue   
+            if val == None or val == "":
+                continue
+            
             names.append(name)
-            if isinstance(val, int):
-                values.append(str(val))
-            else:
-                values.append("'{}'".format(val))
+            values.append("%s")            
+            true_values.append(val)
 
         query = ""
         for i in range(0,len(names)):
@@ -67,10 +79,11 @@ class Model(object):
         query = query[:-1]
 
         pre_exec = PreExec()
-        pre_exec.sql = sql.format(table_name=table_name, query=query, id=self.id)
-
+        pre_exec.sql = sql.format(table_name=table_name, query=query, id="%s")
+        true_values.append(self.id)
+        pre_exec.values = true_values
         # logging.debug("sql {}".format(sql))
-        return pre_exec.exec()
+        return pre_exec.run()
     
     @classmethod
     def where(cls, search_obj):
@@ -82,6 +95,8 @@ class Model(object):
         # logging.debug("sql {}".format(sql))
         pre_exec = PreExec()
         pre_exec.sql = sql
+        pre_exec.values = search_obj.values
+        pre_exec.target_class=cls
         return pre_exec
     
     @classmethod
@@ -93,55 +108,42 @@ class Model(object):
         # logging.debug("sql {}".format(sql))
         pre_exec = PreExec()
         pre_exec.sql = sql
+        pre_exec.target_class=cls
         return pre_exec
+
+def _opt(opt, kwargs):
+    sql = ""
+    values = []
+    for k in kwargs:
+        val = kwargs[k]
+        values.append(val)
+        sql = "{}{}{}".format(k, opt, "%s")
+    return sql, values
 
 def eq(**kwargs):
     sq = SQ()
-    for k in kwargs:
-        if isinstance(kwargs[k], int):
-            sq.sql = "{}={}".format(k,kwargs[k])
-        else:
-            sq.sql = "{}='{}'".format(k,kwargs[k])
-        # logging.debug("sql {}".format(self.sql))
-        break
+    sq.sql, sq.values = _opt("=", kwargs)
     return sq
 
 def neq(**kwargs):
     sq = SQ()
-    for k in kwargs:
-        if isinstance(kwargs[k], int):
-            sq.sql = "{}<>{}".format(k,kwargs[k])
-        else:
-            sq.sql = "{}<>'{}'".format(k,kwargs[k])
-        # logging.debug("sql {}".format(self.sql))
-        break
+    sq.sql, sq.values = _opt("<>", kwargs)
     return sq
 
 def more(**kwargs):
     sq = SQ()
-    for k in kwargs:
-        if isinstance(kwargs[k], int):
-            sq.sql = "{}>{}".format(k,kwargs[k])
-        else:
-            sq.sql = "{}>'{}'".format(k,kwargs[k])
-        # logging.debug("sql {}".format(self.sql))
-        break
+    sq.sql, sq.values = _opt(">", kwargs)
     return sq
 
 def less(**kwargs):
     sq = SQ()
-    for k in kwargs:
-        if isinstance(kwargs[k], int):
-            sq.sql = "{}<{}".format(k,kwargs[k])
-        else:
-            sq.sql = "{}<'{}'".format(k,kwargs[k])
-        # logging.debug("sql {}".format(self.sql))
-        break
+    sq.sql, sq.values = _opt("<", kwargs)
     return sq
 
 class SQ(object):
     def __init__(self):
-        self.sql = ""    
+        self.sql = ""
+        self.values = []
 
     def or_eq(self, **kwargs):
         return self._opt("or","=", **kwargs)
@@ -169,21 +171,22 @@ class SQ(object):
 
     def _opt(self,relation, op, **kwargs):
         for k in kwargs:
-            if isinstance(kwargs[k], int):
-                self.sql += " {} {}{}{}".format(relation, k,op,kwargs[k])
-            else:
-                self.sql += " {} {}{}'{}'".format(relation, k,op,kwargs[k])
+            val = kwargs[k]
+            self.values.append(val)
+            self.sql += " {} {}{}{}".format(relation, k,op,"%s")
             # logging.debug("sql {}".format(self.sql))
             break
         return self
     
     def And(self, search_query_obj):
         self.sql = "{} and ({})".format(self.sql, search_query_obj.sql)
+        self.values += search_query_obj.values
         # logging.debug("sql {}".format(self.sql))
         return self
         
     def Or(self, search_query_obj):
         self.sql = "{} and ({})".format(self.sql, search_query_obj.sql)
+        self.values += search_query_obj.values
         # logging.debug("sql {}".format(self.sql))
         return self
 
@@ -194,6 +197,11 @@ class SQ(object):
         return self
 
 class PreExec(object):
+    def __init__(self):
+        self.sql = ""
+        self.values = []
+        self.target_class = None
+
     def order_by_desc(self, col_name):
         self.sql += " order by {} desc".format(col_name)
         return self
@@ -210,18 +218,37 @@ class PreExec(object):
         self.sql += " limit {}".format(query)
         return self
 
-    def exec(self):
-        exec = Exec()
-        exec.sql = self.sql
-        return exec.exec()
+    def run(self):
+        exec_obj = Exec()
+        exec_obj.sql = self.sql
+        exec_obj.values = self.values
+        exec_obj.target_class = self.target_class
+        return exec_obj.run()
 
 
 class Exec(object):
     def __init__(self):
         self.sql = ""
+        self.values = []
+        self.target_class = None
 
-    def exec(self):
-        logging.debug("exec sql {}".format(self.sql))
+    def run(self):
+        logging.debug("exec sql {} {}".format(self.sql, self.values))
+        if "insert" in self.sql:
+            return db.insert(self.sql, *self.values)
+        
+        if "select" in self.sql:
+            data_list = db.query(self.sql, *self.values)
+            obj_list = []
+            
+            for dbdata in data_list:
+                obj = self.target_class()
+                for dbdata_key in dbdata:                    
+                    obj.__dict__[dbdata_key] = dbdata[dbdata_key]
+                obj_list.append(obj)
+            return obj_list
+        else:
+            return db.execute(self.sql, *self.values)
 
 
 class OneToMany(object):
@@ -232,9 +259,7 @@ class OneToMany(object):
 
     def _generate(self):
         parent_key_val = self.parent_obj.__dict__[self.bind_key[0]]
-        if not isinstance(parent_key_val, int):
-            parent_key_val = "'{}'".format(parent_key_val)
-
+       
         child_bind_key = self.bind_key[1]
         child_class = self.child_class
 
@@ -243,14 +268,14 @@ class OneToMany(object):
         return eq(**input_map).wrap
 
     def where(self, search_obj):
-        pre_exec = self.child_class.where(self._generate().And(search_obj)) 
+        pre_exec = self.child_class.where(self._generate().And(search_obj))
         # logging.debug("sql {}".format(sql))
         return pre_exec
     
-    def exec(self):
+    def run(self):
         pre_exec = self.child_class.where(self._generate()) 
         # logging.debug("sql {}".format(sql))
-        return pre_exec.exec()
+        return pre_exec.run()
     
 
 class ManyToOne(object):
@@ -259,11 +284,11 @@ class ManyToOne(object):
         self.bind_key = bind_key
         self.child_obj = child_obj
 
-    def exec(self):
+    def run(self):
         bind_key_val = self.child_obj.__dict__[self.bind_key[0]]
-        if not isinstance(bind_key_val, int):
-            bind_key_val = "'{}'".format(bind_key_val)
 
         bind_parent_key = self.bind_key[1]
         parent = self.parent_class
-        return parent.query_where("{}={}".format(bind_parent_key, bind_key_val)).exec()
+        input_map = {}
+        input_map[bind_parent_key] = bind_key_val
+        return parent.where(eq(**input_map)).run()
