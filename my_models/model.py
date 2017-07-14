@@ -1,13 +1,7 @@
 # coding:utf-8
-import inspect
 import logging
-import my_models.set_logging as set_logging
-
-if not set_logging.ISSET:
-    set_logging.set_logger()
-
 import torndb
-db = torndb.Connection("localhost", "test_yzh", user="root", password="yzh123")    
+db = torndb.Connection("localhost", "test_yzh", user="root", password="yzh123")   
 
 def first_or_none(objs):
     if objs:
@@ -35,7 +29,7 @@ class Model(object):
                 continue
 
             if val == None or val == "":
-                continue         
+                continue
             names += name + ","
             values += "%s" + ","
             true_values.append(val)
@@ -64,17 +58,17 @@ class Model(object):
         for name, val in table_property:
             if isinstance(val, OneToMany) or isinstance(val, ManyToOne):
                 continue
-            if name=="id":
+            if name == "id":
                 continue
             if val == None or val == "":
                 continue
-            
+
             names.append(name)
-            values.append("%s")            
+            values.append("%s")
             true_values.append(val)
 
         query = ""
-        for i in range(0,len(names)):
+        for i in range(0, len(names)):
             query += "{}={},".format(names[i], values[i])
         query = query[:-1]
 
@@ -84,7 +78,58 @@ class Model(object):
         pre_exec.values = true_values
         # logging.debug("sql {}".format(sql))
         return pre_exec.run()
-    
+
+    def delete(self):
+        """
+        update 表名 set id=1, name="haha" where id=1
+        """
+        if self.id:
+            table_name = self.__class__.__name__
+            table_property = self.__dict__.items()
+
+            sql = "delete from {table_name} where id=%s"
+            true_values = []
+
+            pre_exec = PreExec()
+            true_values.append(self.id)
+            pre_exec.values = true_values
+            pre_exec.sql = sql.format(table_name=table_name)
+            # logging.debug("sql {}".format(sql))
+            return pre_exec.run()
+        else:
+            return None
+
+    @classmethod
+    def get_all(cls):
+        sql = "select * from {table_name}"
+        table_name = cls.__name__
+
+        sql = sql.format(table_name=table_name)
+        # logging.debug("sql {}".format(sql))
+        pre_exec = PreExec()
+        pre_exec.sql = sql
+        pre_exec.target_class = cls
+        return pre_exec
+
+    @classmethod
+    def get_count(cls, search_obj=None):
+        pre_exec = PreExec()
+        table_name = cls.__name__
+
+        if search_obj:
+            sql = "select count(id) from {table_name} where {query}"
+            query = search_obj.sql
+            sql = sql.format(table_name=table_name, query=query)
+            pre_exec.values = search_obj.values
+        else:
+            sql = "select count(id) from {table_name}"
+            sql = sql.format(table_name=table_name)
+
+        # logging.debug("sql {}".format(sql))
+        pre_exec.sql = sql
+        pre_exec.target_class = cls
+        return pre_exec
+
     @classmethod
     def where(cls, search_obj):
         sql = "select * from {table_name} where {query}"
@@ -96,9 +141,9 @@ class Model(object):
         pre_exec = PreExec()
         pre_exec.sql = sql
         pre_exec.values = search_obj.values
-        pre_exec.target_class=cls
+        pre_exec.target_class = cls
         return pre_exec
-    
+
     @classmethod
     def query_where(cls, query):
         sql = "select * from {table_name} where {query}"
@@ -108,8 +153,9 @@ class Model(object):
         # logging.debug("sql {}".format(sql))
         pre_exec = PreExec()
         pre_exec.sql = sql
-        pre_exec.target_class=cls
+        pre_exec.target_class = cls
         return pre_exec
+
 
 def _opt(opt, kwargs):
     sql = ""
@@ -120,25 +166,30 @@ def _opt(opt, kwargs):
         sql = "{}{}{}".format(k, opt, "%s")
     return sql, values
 
+
 def eq(**kwargs):
     sq = SQ()
     sq.sql, sq.values = _opt("=", kwargs)
     return sq
+
 
 def neq(**kwargs):
     sq = SQ()
     sq.sql, sq.values = _opt("<>", kwargs)
     return sq
 
+
 def more(**kwargs):
     sq = SQ()
     sq.sql, sq.values = _opt(">", kwargs)
     return sq
 
+
 def less(**kwargs):
     sq = SQ()
     sq.sql, sq.values = _opt("<", kwargs)
     return sq
+
 
 class SQ(object):
     def __init__(self):
@@ -146,44 +197,44 @@ class SQ(object):
         self.values = []
 
     def or_eq(self, **kwargs):
-        return self._opt("or","=", **kwargs)
-    
+        return self._opt("or", "=", **kwargs)
+
     def and_eq(self, **kwargs):
-        return self._opt("and","=", **kwargs)
+        return self._opt("and", "=", **kwargs)
 
     def or_neq(self, **kwargs):
-        return self._opt("or","<>", **kwargs)
+        return self._opt("or", "<>", **kwargs)
 
     def and_neq(self, **kwargs):
-        return self._opt("and","<>", **kwargs)
+        return self._opt("and", "<>", **kwargs)
 
     def and_more(self, **kwargs):
-        return self._opt("and",">", **kwargs)
+        return self._opt("and", ">", **kwargs)
 
     def or_more(self, **kwargs):
-        return self._opt("or",">", **kwargs)
- 
-    def or_less(self, **kwargs):
-        return self._opt("or","<", **kwargs)
-    
-    def and_less(self, **kwargs):
-        return self._opt("and","<", **kwargs)
+        return self._opt("or", ">", **kwargs)
 
-    def _opt(self,relation, op, **kwargs):
+    def or_less(self, **kwargs):
+        return self._opt("or", "<", **kwargs)
+
+    def and_less(self, **kwargs):
+        return self._opt("and", "<", **kwargs)
+
+    def _opt(self, relation, op, **kwargs):
         for k in kwargs:
             val = kwargs[k]
             self.values.append(val)
-            self.sql += " {} {}{}{}".format(relation, k,op,"%s")
+            self.sql += " {} {}{}{}".format(relation, k, op, "%s")
             # logging.debug("sql {}".format(self.sql))
             break
         return self
-    
+
     def And(self, search_query_obj):
         self.sql = "{} and ({})".format(self.sql, search_query_obj.sql)
         self.values += search_query_obj.values
         # logging.debug("sql {}".format(self.sql))
         return self
-        
+
     def Or(self, search_query_obj):
         self.sql = "{} and ({})".format(self.sql, search_query_obj.sql)
         self.values += search_query_obj.values
@@ -196,6 +247,7 @@ class SQ(object):
         # logging.debug("sql {}".format(self.sql))
         return self
 
+
 class PreExec(object):
     def __init__(self):
         self.sql = ""
@@ -203,11 +255,17 @@ class PreExec(object):
         self.target_class = None
 
     def order_by_desc(self, col_name):
-        self.sql += " order by {} desc".format(col_name)
+        if 'order by' not in self.sql:
+            self.sql += " order by {} desc".format(col_name)
+        else:
+            self.sql += ",{} desc".format(col_name)
         return self
 
     def order_by_asc(self, col_name):
-        self.sql += " order by {} asc".format(col_name)
+        if 'order by' not in self.sql:
+            self.sql += " order by {} asc".format(col_name)
+        else:
+            self.sql += ",{} asc".format(col_name)
         return self
 
     def limit(self, *nums):
@@ -233,33 +291,40 @@ class Exec(object):
         self.target_class = None
 
     def run(self):
-        logging.debug("exec sql {} {}".format(self.sql, self.values))
+        logging.info("exec sql {} {}".format(self.sql, self.values))
         if "insert" in self.sql:
             return db.insert(self.sql, *self.values)
-        
+
         if "select" in self.sql:
             data_list = db.query(self.sql, *self.values)
+
             obj_list = []
-            
             for dbdata in data_list:
                 obj = self.target_class()
-                for dbdata_key in dbdata:                    
+                for dbdata_key in dbdata:
                     obj.__dict__[dbdata_key] = dbdata[dbdata_key]
                 obj_list.append(obj)
             return obj_list
+
+        if 'update' in self.sql:
+            return db.execute(self.sql, *self.values)
+
+        if 'count' in self.sql:
+            data_list = db.query(self.sql, *self.values)
+            return data_list[0]['count(id)']
         else:
             return db.execute(self.sql, *self.values)
 
 
 class OneToMany(object):
-    def __init__(self,parent_obj, child_class, bind_key):
+    def __init__(self, parent_obj, child_class, bind_key):
         self.child_class = child_class
         self.bind_key = bind_key
         self.parent_obj = parent_obj
 
     def _generate(self):
         parent_key_val = self.parent_obj.__dict__[self.bind_key[0]]
-       
+
         child_bind_key = self.bind_key[1]
         child_class = self.child_class
 
@@ -271,12 +336,12 @@ class OneToMany(object):
         pre_exec = self.child_class.where(self._generate().And(search_obj))
         # logging.debug("sql {}".format(sql))
         return pre_exec
-    
+
     def run(self):
-        pre_exec = self.child_class.where(self._generate()) 
+        pre_exec = self.child_class.where(self._generate())
         # logging.debug("sql {}".format(sql))
         return pre_exec.run()
-    
+
 
 class ManyToOne(object):
     def __init__(self, child_obj, parent_class, bind_key):
