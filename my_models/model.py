@@ -1,7 +1,16 @@
-# coding:utf-8
 import logging
-import torndb
-db = torndb.Connection("localhost", "test_yzh", user="root", password="yzh123")   
+import aiomysql
+db = None
+"""
+db可以需要这么初始化，loop = asyncio.get_event_loop()
+db = await aiomysql.create_pool(host=srvconf.mysql_host, 
+                                port=srvconf.mysql_port,
+                                user=srvconf.mysql_user,
+                                password=srvconf.mysql_password,
+                                db=srvconf.database, 
+                                loop=loop, 
+                                charset='utf8', autocommit=True)
+"""
 
 def first_or_none(objs):
     if objs:
@@ -13,7 +22,7 @@ class Model(object):
     def __init__(self):
         pass
 
-    def save(self):
+    async def save(self):
         """
         insert into 表名(id,name) values(0,'XX')
         """
@@ -28,7 +37,7 @@ class Model(object):
             if isinstance(val, OneToMany) or isinstance(val, ManyToOne):
                 continue
 
-            if val == None or val == "":
+            if val == None:
                 continue
             names += name + ","
             values += "%s" + ","
@@ -42,9 +51,9 @@ class Model(object):
         pre_exec.values = true_values
 
         # logging.debug("sql {}".format(sql))
-        return pre_exec.run()
+        return await pre_exec.run()
 
-    def update(self):
+    async def update(self):
         """
         update 表名 set id=1, name="haha" where id=1
         """
@@ -60,7 +69,7 @@ class Model(object):
                 continue
             if name == "id":
                 continue
-            if val == None or val == "":
+            if val == None:
                 continue
 
             names.append(name)
@@ -77,9 +86,9 @@ class Model(object):
         true_values.append(self.id)
         pre_exec.values = true_values
         # logging.debug("sql {}".format(sql))
-        return pre_exec.run()
+        return await pre_exec.run()
 
-    def delete(self):
+    async def delete(self):
         """
         update 表名 set id=1, name="haha" where id=1
         """
@@ -95,7 +104,7 @@ class Model(object):
             pre_exec.values = true_values
             pre_exec.sql = sql.format(table_name=table_name)
             # logging.debug("sql {}".format(sql))
-            return pre_exec.run()
+            return await pre_exec.run()
         else:
             return None
 
@@ -131,8 +140,12 @@ class Model(object):
         return pre_exec
 
     @classmethod
-    def where(cls, search_obj):
+    def where(cls, search_obj, only_get=[]):
         sql = "select * from {table_name} where {query}"
+        if only_get:
+            only_get = ",".join(only_get)
+            sql = 'select '+only_get+" from {table_name} where {query}"
+
         table_name = cls.__name__
 
         query = search_obj.sql
@@ -141,18 +154,6 @@ class Model(object):
         pre_exec = PreExec()
         pre_exec.sql = sql
         pre_exec.values = search_obj.values
-        pre_exec.target_class = cls
-        return pre_exec
-
-    @classmethod
-    def query_where(cls, query):
-        sql = "select * from {table_name} where {query}"
-        table_name = cls.__name__
-
-        sql = sql.format(table_name=table_name, query=query)
-        # logging.debug("sql {}".format(sql))
-        pre_exec = PreExec()
-        pre_exec.sql = sql
         pre_exec.target_class = cls
         return pre_exec
 
@@ -188,6 +189,18 @@ def more(**kwargs):
 def less(**kwargs):
     sq = SQ()
     sq.sql, sq.values = _opt("<", kwargs)
+    return sq
+
+
+def in_it(**kwargs):
+    sq = SQ()
+    for k in kwargs:
+        val_arr = kwargs[k]
+        mask_arr = ['%s' for var in val_arr]
+        mask_arr_str = ",".join(mask_arr)
+        mask_arr_str = "({})".format(mask_arr_str)
+        sq.sql = "{} in {}".format(k, mask_arr_str)
+        sq.values.extend(val_arr)
     return sq
 
 
@@ -228,6 +241,26 @@ class SQ(object):
             # logging.debug("sql {}".format(self.sql))
             break
         return self
+
+    def and_in(self, **kwargs):
+        for k in kwargs:
+            val_arr = kwargs[k]
+            mask_arr = ['%s' for var in val_arr]
+            mask_arr_str = ",".join(mask_arr)
+            mask_arr_str = "({})".format(mask_arr_str)
+            self.sql += " and {} in {}".format(k, mask_arr_str)
+            self.values.extend(val_arr)
+            return self
+
+    def or_in(self, **kwargs):
+        for k in kwargs:
+            val_arr = kwargs[k]
+            mask_arr = ['%s' for var in val_arr]
+            mask_arr_str = ",".join(mask_arr)
+            mask_arr_str = "({})".format(mask_arr_str)
+            self.sql += " or {} in {}".format(k, mask_arr_str)
+            self.values.extend(val_arr)
+            return self
 
     def And(self, search_query_obj):
         self.sql = "{} and ({})".format(self.sql, search_query_obj.sql)
@@ -276,12 +309,12 @@ class PreExec(object):
         self.sql += " limit {}".format(query)
         return self
 
-    def run(self):
+    async def run(self):
         exec_obj = Exec()
         exec_obj.sql = self.sql
         exec_obj.values = self.values
         exec_obj.target_class = self.target_class
-        return exec_obj.run()
+        return await exec_obj.run()
 
 
 class Exec(object):
@@ -290,30 +323,48 @@ class Exec(object):
         self.values = []
         self.target_class = None
 
-    def run(self):
-        logging.info("exec sql {} {}".format(self.sql, self.values))
+    async def run(self):
+        logging.debug("exec sql {} {}".format(self.sql, self.values))
         if "insert" in self.sql:
-            return db.insert(self.sql, *self.values)
-
-        if "select" in self.sql:
-            data_list = db.query(self.sql, *self.values)
-
+            async with db.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(self.sql, self.values)
+                    await conn.commit()
+                    ret = cur.lastrowid
+                    return ret
+        elif 'count(id)' in self.sql:
+            async with db.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    ret = await cur.execute(self.sql, self.values)
+                    r = await cur.fetchall()
+                    return r[0]['count(id)']
+        elif "select" in self.sql:
+            async with db.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cur:
+                    if self.values:
+                        ret = await cur.execute(self.sql, self.values)
+                    else:
+                        ret = await cur.execute(self.sql)
+                    r = await cur.fetchall()
             obj_list = []
-            for dbdata in data_list:
+            for dbdata in r:
                 obj = self.target_class()
                 for dbdata_key in dbdata:
                     obj.__dict__[dbdata_key] = dbdata[dbdata_key]
                 obj_list.append(obj)
             return obj_list
-
-        if 'update' in self.sql:
-            return db.execute(self.sql, *self.values)
-
-        if 'count' in self.sql:
-            data_list = db.query(self.sql, *self.values)
-            return data_list[0]['count(id)']
+        elif 'update' in self.sql:
+            async with db.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(self.sql, self.values)
+                    ret = await conn.commit()
+                    return ret
         else:
-            return db.execute(self.sql, *self.values)
+            async with db.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(self.sql, self.values)
+                    ret = await conn.commit()
+                    return ret
 
 
 class OneToMany(object):

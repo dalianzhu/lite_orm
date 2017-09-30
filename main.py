@@ -1,5 +1,1 @@
-# coding:utf-8
-from test.user_test import test_cases
-if __name__=="__main__":
-    for item in test_cases:
-        item()
+##异步执行比较麻烦，干脆删了。
