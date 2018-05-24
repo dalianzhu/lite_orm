@@ -1,17 +1,81 @@
+# coding:utf-8
+import datetime
 import logging
+
 import aiomysql
+
+from py_common.pipe import Pipe
+
 db = None
+
+primary = 'ID'
+
 """
-db可以需要这么初始化，loop = asyncio.get_event_loop()
-db = await aiomysql.create_pool(host=srvconf.mysql_host, 
+哈哈哈，这是一个很简单的orm。我花了大概一个上午把它写出来，只为了不再写讨厌的sql。
+它使用了大量的字符串拼接，有人会说这性能很差，但这是python，性能能差到哪去呢。
+使用指南：
+1. 首先，你需要在某个地方初始化公用的db对象。就像这样。
+import orm
+orm.db = await aiomysql.create_pool(host=srvconf.mysql_host, 
                                 port=srvconf.mysql_port,
                                 user=srvconf.mysql_user,
                                 password=srvconf.mysql_password,
-                                db=srvconf.database, 
-                                loop=loop, 
-                                charset='utf8', autocommit=True)
+                                db=srvconf.database,
+                                loop=loop,
+                                charset=db_charset,
+                                autocommit=True)
+                                
+2. 然后，确保对应的数据库中有表，比如创建两个表：
+create table User(
+    id bigint(20) not null primary key auto_increment,
+    name bigint(20),
+    )ENGINE=InnoDB DEFAULT CHARSET=utf8;
+    
+create table Article(
+    id bigint(20) not null primary key auto_increment,
+    uid bigint(20),
+    article_name varchar(32) not null default '',
+    )ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+3. 最后，创建对应的实体，并继承orm.Model。
+确保类名就是表名，类的属性就是表的列。确实很简单，不是吗。
+class User(Model):
+        def __init__(self):
+            self.id = 0
+            self.name = ""
+            self.child_article = OneToMany(self, Article, ["id", "uid"])
+
+class Article(Model):
+    def __init__(self):
+        self.id = 0
+        self.article_name = ""
+        self.uid = 0
+        self.parent_user = ManyToOne(self, User, ["uid", "id"])
+        
+然后，就是开心的玩了：
+简单查询：
+user = await User.where(eq(id=1).and_eq(name='yzh')).run() # 返回 [User...]
+user_count = await User.get_count(eq(id=1)).run() # 返回 int
+
+user = await User.where(more(id=1).and_eq(name='yzh')).run() # 返回 [User...]
+
+where()中要放入SQ (search query)对象。提供了
+eq, neq, less, more, in_it等几个初始SQ。它们可以链式调用，也能用 sqobj.And(sqobj2)
+将多个SQ 对象链接起来。
+
+插入:
+表的id最好设置为自增。
+user = User()
+user.name = 'yzh'
+await user.insert()
+
+删除：
+user = await User.where(eq(id=1)).run()
+user = user[0]
+await user.delete()
 """
 
+@Pipe
 def first_or_none(objs):
     if objs:
         return objs[0]
@@ -37,6 +101,9 @@ class Model(object):
             if isinstance(val, OneToMany) or isinstance(val, ManyToOne):
                 continue
 
+            if not isinstance(val, (int, str, datetime.datetime)):
+                continue
+
             if val == None:
                 continue
             names += name + ","
@@ -55,21 +122,23 @@ class Model(object):
 
     async def update(self):
         """
-        update 表名 set id=1, name="haha" where id=1
+        update 表名 set name="haha" where `primary`=1
         """
         table_name = self.__class__.__name__
         table_property = self.__dict__.items()
 
-        sql = "update {table_name} set {query} where id={id}"
+        sql = "update {table_name} set {query} where " + primary + "={id}"
         names = []
         values = []
         true_values = []
         for name, val in table_property:
             if isinstance(val, OneToMany) or isinstance(val, ManyToOne):
                 continue
-            if name == "id":
+            if name == primary:
                 continue
             if val == None:
+                continue
+            if not isinstance(val, (int, str, datetime.datetime)):
                 continue
 
             names.append(name)
@@ -83,24 +152,24 @@ class Model(object):
 
         pre_exec = PreExec()
         pre_exec.sql = sql.format(table_name=table_name, query=query, id="%s")
-        true_values.append(self.id)
+        true_values.append(self.__dict__[primary])
         pre_exec.values = true_values
         # logging.debug("sql {}".format(sql))
         return await pre_exec.run()
 
     async def delete(self):
         """
-        update 表名 set id=1, name="haha" where id=1
+        update 表名 set name="haha" where `primary`=1
         """
-        if self.id:
+        if self.__dict__[primary]:
             table_name = self.__class__.__name__
             table_property = self.__dict__.items()
 
-            sql = "delete from {table_name} where id=%s"
+            sql = "delete from {table_name} where " + primary + "=%s"
             true_values = []
 
             pre_exec = PreExec()
-            true_values.append(self.id)
+            true_values.append(self.__dict__[primary])
             pre_exec.values = true_values
             pre_exec.sql = sql.format(table_name=table_name)
             # logging.debug("sql {}".format(sql))
@@ -126,12 +195,12 @@ class Model(object):
         table_name = cls.__name__
 
         if search_obj:
-            sql = "select count(id) from {table_name} where {query}"
+            sql = "select count(" + primary + ") from {table_name} where {query}"
             query = search_obj.sql
             sql = sql.format(table_name=table_name, query=query)
             pre_exec.values = search_obj.values
         else:
-            sql = "select count(id) from {table_name}"
+            sql = "select count(" + primary + ") from {table_name}"
             sql = sql.format(table_name=table_name)
 
         # logging.debug("sql {}".format(sql))
@@ -144,7 +213,7 @@ class Model(object):
         sql = "select * from {table_name} where {query}"
         if only_get:
             only_get = ",".join(only_get)
-            sql = 'select '+only_get+" from {table_name} where {query}"
+            sql = 'select ' + only_get + " from {table_name} where {query}"
 
         table_name = cls.__name__
 
@@ -159,12 +228,13 @@ class Model(object):
 
 
 def _opt(opt, kwargs):
-    sql = ""
+    # kwargs 是SearchQuery包装传入的参数，比如 ID=1
+    # 但有时 more(ID=1) 代表的意思是 where ID>1
+    # 所有需要按opt（操作）来决定返回的sql，就酱
     values = []
-    for k in kwargs:
-        val = kwargs[k]
-        values.append(val)
-        sql = "{}{}{}".format(k, opt, "%s")
+    k, val = next(iter(kwargs.items()))
+    values.append(val)
+    sql = "{}{}{}".format(k, opt, "%s")
     return sql, values
 
 
@@ -194,17 +264,21 @@ def less(**kwargs):
 
 def in_it(**kwargs):
     sq = SQ()
-    for k in kwargs:
-        val_arr = kwargs[k]
-        mask_arr = ['%s' for var in val_arr]
-        mask_arr_str = ",".join(mask_arr)
-        mask_arr_str = "({})".format(mask_arr_str)
-        sq.sql = "{} in {}".format(k, mask_arr_str)
-        sq.values.extend(val_arr)
+    k, val_arr = next(iter(kwargs.items()))
+    mask_arr = ['%s' for var in val_arr]
+    mask_arr_str = ",".join(mask_arr)
+    mask_arr_str = "({})".format(mask_arr_str)
+    sq.sql = "{} in {}".format(k, mask_arr_str)
+    sq.values.extend(val_arr)
     return sq
 
 
 class SQ(object):
+    # 传说中的search query对象。用在where()中。
+    # 有eq, neq等几个初始方法。
+    # 每调用一次self._opt都会在自身拼接一个“操作”
+    # 这样就能很容易的使用
+    # where(eq(ID=1).and_eq(Name='yzh')) 链式用法。
     def __init__(self):
         self.sql = ""
         self.values = []
@@ -234,41 +308,42 @@ class SQ(object):
         return self._opt("and", "<", **kwargs)
 
     def _opt(self, relation, op, **kwargs):
-        for k in kwargs:
-            val = kwargs[k]
-            self.values.append(val)
-            self.sql += " {} {}{}{}".format(relation, k, op, "%s")
-            # logging.debug("sql {}".format(self.sql))
-            break
+        k, val = next(iter(kwargs.items()))
+        self.values.append(val)
+        self.sql += " {} {}{}{}".format(relation, k, op, "%s")
+        # logging.debug("sql {}".format(self.sql))
         return self
 
     def and_in(self, **kwargs):
-        for k in kwargs:
-            val_arr = kwargs[k]
-            mask_arr = ['%s' for var in val_arr]
-            mask_arr_str = ",".join(mask_arr)
-            mask_arr_str = "({})".format(mask_arr_str)
-            self.sql += " and {} in {}".format(k, mask_arr_str)
-            self.values.extend(val_arr)
-            return self
+        k, val_arr = next(iter(kwargs.items()))
+        mask_arr = ['%s' for var in val_arr]
+        mask_arr_str = ",".join(mask_arr)
+        mask_arr_str = "({})".format(mask_arr_str)
+        self.sql += " and {} in {}".format(k, mask_arr_str)
+        self.values.extend(val_arr)
+        return self
 
     def or_in(self, **kwargs):
-        for k in kwargs:
-            val_arr = kwargs[k]
-            mask_arr = ['%s' for var in val_arr]
-            mask_arr_str = ",".join(mask_arr)
-            mask_arr_str = "({})".format(mask_arr_str)
-            self.sql += " or {} in {}".format(k, mask_arr_str)
-            self.values.extend(val_arr)
-            return self
+        k, val_arr = next(iter(kwargs.items()))
+        mask_arr = ['%s' for var in val_arr]
+        mask_arr_str = ",".join(mask_arr)
+        mask_arr_str = "({})".format(mask_arr_str)
+        self.sql += " or {} in {}".format(k, mask_arr_str)
+        self.values.extend(val_arr)
+        return self
 
     def And(self, search_query_obj):
+        # 无论何时，调用And都能将两个search query用and的方式拼在一起
+        # 是不是很棒？
+        # eq(ID=1).or_eq(Name='yzh').And(eq(Status='admin'))
+        # 等同于 ID=1 or Name='yzh' and (status='admin')
         self.sql = "{} and ({})".format(self.sql, search_query_obj.sql)
         self.values += search_query_obj.values
         # logging.debug("sql {}".format(self.sql))
         return self
 
     def Or(self, search_query_obj):
+        # 类似And，只是这次用的是or 来连接两个search query
         self.sql = "{} and ({})".format(self.sql, search_query_obj.sql)
         self.values += search_query_obj.values
         # logging.debug("sql {}".format(self.sql))
@@ -276,12 +351,18 @@ class SQ(object):
 
     @property
     def wrap(self):
+        # 把自己打个括号，建议少用。太复杂的orm不如直接使用query方法
         self.sql = "({})".format(self.sql)
         # logging.debug("sql {}".format(self.sql))
         return self
 
 
 class PreExec(object):
+    """
+    在真正执行sql前，还需要插入几个操作，比如limit, order by之类的
+    没有实现group by，因为这个句子会破坏orm映射实体。
+    """
+
     def __init__(self):
         self.sql = ""
         self.values = []
@@ -332,12 +413,12 @@ class Exec(object):
                     await conn.commit()
                     ret = cur.lastrowid
                     return ret
-        elif 'count(id)' in self.sql:
+        elif 'count({})'.format(primary) in self.sql:
             async with db.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
                     ret = await cur.execute(self.sql, self.values)
                     r = await cur.fetchall()
-                    return r[0]['count(id)']
+                    return r[0]['count({})'.format(primary)]
         elif "select" in self.sql:
             async with db.acquire() as conn:
                 async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -368,6 +449,15 @@ class Exec(object):
 
 
 class OneToMany(object):
+    """
+    关系式数据库，当然需要有关系。这真的很复杂，我反正没在项目里用过。
+    如上面的两个实体
+    OneToMany(self, ARTICLE, ["id", "uid"]) 代表，一个User.id 对应多个Article.uid
+    可以使用这样的句子查询：
+    user = await User.where(eq(id=1)).run()|first_or_none
+    articles = await user.child_article.run()
+    """
+
     def __init__(self, parent_obj, child_class, bind_key):
         self.child_class = child_class
         self.bind_key = bind_key
@@ -377,7 +467,6 @@ class OneToMany(object):
         parent_key_val = self.parent_obj.__dict__[self.bind_key[0]]
 
         child_bind_key = self.bind_key[1]
-        child_class = self.child_class
 
         input_map = {}
         input_map[child_bind_key] = parent_key_val
@@ -395,6 +484,11 @@ class OneToMany(object):
 
 
 class ManyToOne(object):
+    """
+    就像上面：
+    article = await Article.where(eq(id=1)).run()|first_or_none
+    user = await article.parent_user.run()|first_or_none
+    """
     def __init__(self, child_obj, parent_class, bind_key):
         self.parent_class = parent_class
         self.bind_key = bind_key
@@ -408,3 +502,36 @@ class ManyToOne(object):
         input_map = {}
         input_map[bind_parent_key] = bind_key_val
         return parent.where(eq(**input_map)).run()
+
+
+def get_conn():
+    return db.acquire()
+
+
+async def query(sql, conn=None):
+    """
+    当上面都不能解决你的需求，那返璞归真吧。没有什么是一个query不能解决的，
+    如果还有，那就execute一下。
+    你可以使用已用的conn，如果不传入，我们会给你创建一个。
+    """
+    logging.debug('orm query: sql {}'.format(sql))
+    if not conn:
+        async with db.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(sql)
+                r = await cur.fetchall()
+                return r
+    else:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute(sql)
+            r = await cur.fetchall()
+            return r
+
+
+async def execute(sql, values):
+    logging.debug('orm execute: sql {}'.format(sql))
+    async with db.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(sql, values)
+            ret = await conn.commit()
+            return ret
