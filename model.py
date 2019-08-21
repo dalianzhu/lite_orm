@@ -239,14 +239,14 @@ class Model(object):
     @classmethod
     def left_join(cls, table, on):
         j = _joinObj()
-        j.join_sql = " left join {} on {} ".format(table, on)
+        j.join_sql = " left join {} on {} ".format(table.__name__, on)
         j.main_table = cls.__name__
         return j
 
     @classmethod
     def right_join(cls, table, on):
         j = _joinObj()
-        j.join_sql = " right join {} on {} ".format(table, on)
+        j.join_sql = " right join {} on {} ".format(table.__name__, on)
         j.main_table = cls.__name__
         return j
 
@@ -257,11 +257,11 @@ class _joinObj():
         self.join_sql = ""
 
     def left_join(self, table, on):
-        self.join_sql += " left join {table} on {on} ".format(table=table, on=on)
+        self.join_sql += " left join {table} on {on} ".format(table=table.__name__, on=on)
         return self
 
     def right_join(self, table, on):
-        self.join_sql += " right join {table} on {on} ".format(table=table, on=on)
+        self.join_sql += " right join {table} on {on} ".format(table=table.__name__, on=on)
         return self
 
     def where(self, search_obj):

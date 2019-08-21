@@ -116,7 +116,7 @@ async def test_case_3():
             self.uid = ""
             self.article_name = ""
 
-    ret = await User.left_join('Article', "User.id=Article.uid").run(Merge)
+    ret = await User.left_join(Article, "User.id=Article.uid").run(Merge)
     for item in ret:
         logging.debug("test join {}".format(item.__dict__))
     assert len(ret) == 3
@@ -124,7 +124,7 @@ async def test_case_3():
     user = await User.where(eq(name="superpig")).run()
     user = first_or_none(user)
 
-    ret = await User.left_join('Article', "User.id=Article.uid") \
+    ret = await User.left_join(Article, "User.id=Article.uid") \
         .where(more(Article__id=1)
                .and_eq(name="superpig")).run(Merge)
     for item in ret:
