@@ -3,3 +3,8 @@
 1. 必须有个字段叫ID。且为主键。
 2. table 与 class name必须对应。
 3. table字段与class属性必须对应。
+
+简单使用：
+把model.py复制到你的项目中去
+
+然后使用它

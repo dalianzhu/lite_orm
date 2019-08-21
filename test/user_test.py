@@ -1,119 +1,139 @@
-from test.user import USER, ARTICLE
-from my_models.model import SQ, eq, more, less, Exec, first_or_none
+import asyncio
 import logging
 
+import aiomysql
+
+from model import eq, more, execute, first_or_none
+from model import set_globle_db
+from test.user import User, Article
+
+
+async def init():
+    """
+create table User(
+    id bigint(20) not null primary key auto_increment,
+    name varchar(64)
+    )ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+create table Article(
+    id bigint(20) not null primary key auto_increment,
+    uid bigint(20),
+    article_name varchar(32) not null default ''
+    )ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+    """
+
+    loop = asyncio.get_event_loop()
+    db = await aiomysql.create_pool(host="127.0.0.1",
+                                    port=3306,
+                                    user="root",
+                                    password="123456",
+                                    db="test",
+                                    loop=loop,
+                                    charset="utf8",
+                                    autocommit=True)
+    set_globle_db(db)
+    await execute("delete from User;", [])
+    await execute("delete from Article;", [])
+
+    u1 = User()
+    u1.name = "superpig"
+    uid = await u1.save()
+
+    u2 = User()
+    u2.name = "bigpig"
+    await u2.save()
+
+    a1 = Article()
+    a1.uid = uid
+    a1.article_name = "文章名1"
+    await a1.save()
+
+    a2 = Article()
+    a2.uid = uid
+    a2.article_name = "文章名2"
+    await a2.save()
+
+
 async def test_case_1():
-    def run(self):
-        return self.sql, self.values
-    Exec.run = run
+    """
+    测试关系
+    :return:
+    """
+    user = await User.where(eq(name="superpig")).run()
+    user = first_or_none(user)
 
-    user = USER()
-    user.id = 123
-    user.age = 26
-    user.name = "yzh"
+    ret = await user.child_article.run()
+    logging.debug("testcase1 sql {}".format(ret))
 
-    sql = await user.child_article.run()
-    logging.debug("testcase1 sql {}".format(sql))
-    assert sql[0]=='select * from ARTICLE where (uid=%s)'
-    assert sql[1]==[123]
+    assert ret[0].article_name == "文章名1"
+    assert ret[1].article_name == "文章名2"
 
-    sql = user.child_article.where(eq(id=1)).run()
-    logging.debug("testcase1 where_sql_1 {}".format(sql))
-    assert sql[0]=='select * from ARTICLE where (uid=%s) and (id=%s)'
-    assert sql[1]== [123, 1]
-    
+    article = await Article.where(eq(article_name="文章名1")).run()
+    article = first_or_none(article)
+    user = await article.parent_user.run()
+    user = first_or_none(user)
+    assert user.name == "superpig"
+
+
 async def test_case_2():
-    article = ARTICLE()
-    article.id = 9000
-    article.uid = 123
-    article.article_name = "good book"
+    """
+    测试查找
+    :return:
+    """
+    user1 = await User.where(eq(name="superpig")).run()
+    user1 = first_or_none(user1)
+    logging.debug("user1 {}".format(user1))
 
-    sql = await article.parent_user.run()
-    logging.debug("test_case_2 exec_sql {}".format(sql))
-    assert sql[0]=='select * from USER where id=%s'
-    assert sql[1]== [123]
+    find = False
+    user_all = await User.get_all().run()
+    for user in user_all:
+        if user.name == "superpig":
+            find = True
+    assert find == True
+
+    assert len(user_all) == 2
+
+    articles = await Article.where(more(id=0)).run()
+    for article in articles:
+        logging.debug("article {}".format(article.__dict__))
+    assert len(articles) == 2
+    assert articles[0].uid == user1.id
+
 
 async def test_case_3():
-    sql = await USER.where(
-        more(age=10).and_less(age=30)
-        ).run()
-    logging.debug("test_case_3 sql {}".format(sql))
-    assert sql[0]=='select * from USER where age>%s and age<%s'
-    assert sql[1]== [10, 30]
+    """
+    测试join
+    :return:
+    """
 
-    sql = await USER.where(
-        less(age=10).or_more(age=30).wrap.and_eq(is_admin=1)
-        ).run()
+    class Merge():
+        def __init__(self):
+            self.id = ""
+            self.name = ""
 
-    logging.debug("test_case_3 sql {}".format(sql))
-    assert sql[0]=='select * from USER where (age<%s or age>%s) and is_admin=%s'
-    assert sql[1]== [10, 30, 1]
+            self.Article__id = ""  # 因为Article的id和User中的重复了，所以使用 表__字段 的方式表示
+            self.uid = ""
+            self.article_name = ""
 
-async def test_case_4():
-    article = ARTICLE()
-    article.id = 9000
-    article.uid = 123
-    article.article_name = "good book"
-    article.article_pages = 99
+    ret = await User.left_join('Article', "User.id=Article.uid").run(Merge)
+    for item in ret:
+        logging.debug("test join {}".format(item.__dict__))
+    assert len(ret) == 3
 
-    sql = await article.save()
-    logging.debug("test_case_4 sql {}".format(sql))
-    assert sql[0]=='insert into ARTICLE(article_name,article_pages,id,uid) values(%s,%s,%s,%s)'
-    assert sql[1]== ['good book', 99, 9000, 123]
+    user = await User.where(eq(name="superpig")).run()
+    user = first_or_none(user)
 
-
-async def test_case_5():
-    # test update
-    article = ARTICLE()
-    article.id = 9000
-    # article.uid = 123
-    article.article_name = "good book"
-    article.article_pages = 199
-
-    sql = await article.update()
-    logging.debug("test_case_5 sql {}".format(sql))
-    assert sql[0]=="update ARTICLE set article_name=%s,article_pages=%s where id=%s)"
-    assert sql[1]==  ['good book', 199,9000]
-
-async def test_case_6():
-    # test inject
-    sql = await USER.where(eq(id=1).Or(eq(id=5).or_eq(id=6))).run()
-    logging.debug("test_case_6 sql {}".format(sql))
-
-def test_case_7():
-    # 这个用例需要先插入两条数据
-    # user = USER()
-    # user.id = 0
-    # user.age = 26
-    # user.name = "yzh"
-    # user.is_admin = 1
-    # user.save()
-    # article = ARTICLE()
-    # article.article_name = "gone with the wind"
-    # article.article_pages = 288
-    # article.uid = 124
-    # article.save()
-
-    # user = first_or_none(USER.where(eq(id=124)).run())
-    # logging.debug("test_case_7 user {}".format(user.__dict__))
-
-    # article = first_or_none(user.child_article.where(eq(id=1)).run()) 
-    # logging.debug("test_case_7 article {}".format(article.__dict__))
-
-    # parent_user = first_or_none(article.parent_user.run())
-    # logging.debug("test_case_7 parent_user {}".format(parent_user.__dict__))
-
-    # parent_user.is_admin = 1
-    # parent_user.update()
-    pass
-
+    ret = await User.left_join('Article', "User.id=Article.uid") \
+        .where(more(Article__id=1)
+               .and_eq(name="superpig")).run(Merge)
+    for item in ret:
+        logging.debug("test join {}".format(item.__dict__))
+    m = first_or_none(ret)
+    assert m.name == user.name
 
 test_cases = [
-    # test_case_1,
-    # test_case_2,
-    # test_case_3,
-    # test_case_4,
-    # test_case_5,
-    # test_case_6,
-    test_case_7,
+    test_case_1,
+    test_case_2,
+    test_case_3,
 ]

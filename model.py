@@ -4,11 +4,20 @@ import logging
 
 import aiomysql
 
-from py_common.pipe import Pipe
-
 db = None
 
-primary = 'ID'
+primary = 'id'
+
+
+def set_globle_db(input_db):
+    global db
+    db = input_db
+
+
+def set_primary(key):
+    global primary
+    primary = key
+
 
 """
 哈哈哈，这是一个很简单的orm。我花了大概一个上午把它写出来，只为了不再写讨厌的sql。
@@ -16,7 +25,7 @@ primary = 'ID'
 使用指南：
 1. 首先，你需要在某个地方初始化公用的db对象。就像这样。
 import orm
-orm.db = await aiomysql.create_pool(host=srvconf.mysql_host, 
+db = await aiomysql.create_pool(host=srvconf.mysql_host, 
                                 port=srvconf.mysql_port,
                                 user=srvconf.mysql_user,
                                 password=srvconf.mysql_password,
@@ -24,17 +33,18 @@ orm.db = await aiomysql.create_pool(host=srvconf.mysql_host,
                                 loop=loop,
                                 charset=db_charset,
                                 autocommit=True)
+orm.set_global_db(db)
                                 
 2. 然后，确保对应的数据库中有表，比如创建两个表：
 create table User(
     id bigint(20) not null primary key auto_increment,
-    name bigint(20),
+    name bigint(20)
     )ENGINE=InnoDB DEFAULT CHARSET=utf8;
     
 create table Article(
     id bigint(20) not null primary key auto_increment,
     uid bigint(20),
-    article_name varchar(32) not null default '',
+    article_name varchar(32) not null default ''
     )ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 3. 最后，创建对应的实体，并继承orm.Model。
@@ -75,7 +85,7 @@ user = user[0]
 await user.delete()
 """
 
-@Pipe
+
 def first_or_none(objs):
     if objs:
         return objs[0]
@@ -226,6 +236,55 @@ class Model(object):
         pre_exec.target_class = cls
         return pre_exec
 
+    @classmethod
+    def left_join(cls, table, on):
+        j = _joinObj()
+        j.join_sql = " left join {} on {} ".format(table, on)
+        j.main_table = cls.__name__
+        return j
+
+    @classmethod
+    def right_join(cls, table, on):
+        j = _joinObj()
+        j.join_sql = " right join {} on {} ".format(table, on)
+        j.main_table = cls.__name__
+        return j
+
+
+class _joinObj():
+    def __init__(self):
+        self.main_table = ""
+        self.join_sql = ""
+
+    def left_join(self, table, on):
+        self.join_sql += " left join {table} on {on} ".format(table=table, on=on)
+        return self
+
+    def right_join(self, table, on):
+        self.join_sql += " right join {table} on {on} ".format(table=table, on=on)
+        return self
+
+    def where(self, search_obj):
+        sql = "select * from {main_table} {join_sql} where {where}" \
+            .format(main_table=self.main_table,
+                    join_sql=self.join_sql, where=search_obj.sql)
+
+        pre_exec = PreExec()
+        pre_exec.sql = sql
+        pre_exec.target_class = None
+        pre_exec.values = search_obj.values
+        return pre_exec
+
+    async def run(self, target_class):
+        pre_exec = PreExec()
+        pre_exec.sql = "select * from {main_table} {join_sql}" \
+            .format(main_table=self.main_table,
+                    join_sql=self.join_sql)
+        pre_exec.target_class = target_class
+        return await pre_exec.run()
+
+    # select * from User left join Article on Article.uid=User.id
+
 
 def _opt(opt, kwargs):
     # kwargs 是SearchQuery包装传入的参数，比如 ID=1
@@ -233,6 +292,8 @@ def _opt(opt, kwargs):
     # 所有需要按opt（操作）来决定返回的sql，就酱
     values = []
     k, val = next(iter(kwargs.items()))
+    # 处理 join __
+    k = k.replace("__", ".")
     values.append(val)
     sql = "{}{}{}".format(k, opt, "%s")
     return sql, values
@@ -265,6 +326,9 @@ def less(**kwargs):
 def in_it(**kwargs):
     sq = SQ()
     k, val_arr = next(iter(kwargs.items()))
+    # 处理 join __
+    k = k.replace("__", ".")
+
     mask_arr = ['%s' for var in val_arr]
     mask_arr_str = ",".join(mask_arr)
     mask_arr_str = "({})".format(mask_arr_str)
@@ -390,11 +454,14 @@ class PreExec(object):
         self.sql += " limit {}".format(query)
         return self
 
-    async def run(self):
+    async def run(self, target_class=None):
         exec_obj = Exec()
         exec_obj.sql = self.sql
         exec_obj.values = self.values
-        exec_obj.target_class = self.target_class
+        if not target_class:
+            exec_obj.target_class = self.target_class
+        else:
+            exec_obj.target_class = target_class
         return await exec_obj.run()
 
 
@@ -431,7 +498,14 @@ class Exec(object):
             for dbdata in r:
                 obj = self.target_class()
                 for dbdata_key in dbdata:
-                    obj.__dict__[dbdata_key] = dbdata[dbdata_key]
+                    # 处理join
+                    class_key = dbdata_key
+                    if "." in dbdata_key:
+                        class_key = dbdata_key.replace(".", "__")
+
+                    if class_key not in obj.__dict__:
+                        continue
+                    obj.__dict__[class_key] = dbdata[dbdata_key]
                 obj_list.append(obj)
             return obj_list
         elif 'update' in self.sql:
@@ -489,6 +563,7 @@ class ManyToOne(object):
     article = await Article.where(eq(id=1)).run()|first_or_none
     user = await article.parent_user.run()|first_or_none
     """
+
     def __init__(self, child_obj, parent_class, bind_key):
         self.parent_class = parent_class
         self.bind_key = bind_key
