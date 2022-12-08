@@ -1,4 +1,4 @@
-from model import Model, OneToMany, ManyToOne
+from orm import Model, OneToMany, ManyToOne
 
 
 class User(Model):
@@ -6,6 +6,7 @@ class User(Model):
         self.id = 0
         self.name = ""
         self.child_article = OneToMany(self, Article, ["id", "uid"])
+
 
 class Article(Model):
     def __init__(self):

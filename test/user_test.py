@@ -3,8 +3,8 @@ import logging
 
 import aiomysql
 
-from model import eq, more, execute, first_or_none
-from model import set_globle_db
+from orm import eq, more, execute, first_or_none
+from orm import set_globle_db
 from test.user import User, Article
 
 

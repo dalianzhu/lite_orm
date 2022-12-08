@@ -111,7 +111,7 @@ class Model(object):
             if isinstance(val, OneToMany) or isinstance(val, ManyToOne):
                 continue
 
-            if not isinstance(val, (int, str, datetime.datetime)):
+            if not isinstance(val, (int, str, datetime.datetime, float)):
                 continue
 
             if val == None:
@@ -124,7 +124,8 @@ class Model(object):
         values = values[:-1]
 
         pre_exec = PreExec()
-        pre_exec.sql = sql.format(table_name=table_name, names=names, values=values)
+        pre_exec.sql = sql.format(
+            table_name=table_name, names=names, values=values)
         pre_exec.values = true_values
 
         # logging.debug("sql {}".format(sql))
@@ -148,7 +149,7 @@ class Model(object):
                 continue
             if val == None:
                 continue
-            if not isinstance(val, (int, str, datetime.datetime)):
+            if not isinstance(val, (int, str, datetime.datetime, float)):
                 continue
 
             names.append(name)
@@ -205,7 +206,8 @@ class Model(object):
         table_name = cls.__name__
 
         if search_obj:
-            sql = "select count(" + primary + ") from {table_name} where {query}"
+            sql = "select count(" + primary + \
+                ") from {table_name} where {query}"
             query = search_obj.sql
             sql = sql.format(table_name=table_name, query=query)
             pre_exec.values = search_obj.values
@@ -257,11 +259,13 @@ class _joinObj():
         self.join_sql = ""
 
     def left_join(self, table, on):
-        self.join_sql += " left join {table} on {on} ".format(table=table.__name__, on=on)
+        self.join_sql += " left join {table} on {on} ".format(
+            table=table.__name__, on=on)
         return self
 
     def right_join(self, table, on):
-        self.join_sql += " right join {table} on {on} ".format(table=table.__name__, on=on)
+        self.join_sql += " right join {table} on {on} ".format(
+            table=table.__name__, on=on)
         return self
 
     def where(self, search_obj):
