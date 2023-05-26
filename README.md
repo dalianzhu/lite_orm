@@ -132,3 +132,6 @@ if rule:
     # 删除这一行
     # await rule.delete()
 ```
+
+# 协议
+MIT
