@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: lite-orm
+Version: 1.0
+Summary: This is a lightweight ORM utility library that supports aiomysql.
+Home-page: https://github.com/dalianzhu/lite_orm
+Author: superpig
+Author-email: yinzihao1@126.com
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
