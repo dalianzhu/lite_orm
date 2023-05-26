@@ -1,9 +1,15 @@
-# 限制
+# 使用
+## 安装
+```
+pip3 install git+https://github.com/dalianzhu/lite_orm.git
+```
+
+# 注意事项
 
 这是仅仅是一个数据库辅助类，它的功能特别的简单。
 
-- 仅支持最新的python3 asyncio `async/await`语法。使用 aiomysql，需要先安装。`pip3 install aiomysql`
-- 默认主键字段`id`。最好配置自增。否则请使用`set_primary("my_id")`设置自己的id字段。这是全局设置，如果所有的表各有各的主键字段，本工具将不太好用。
+- 仅支持最新的python3 asyncio `async/await`语法。需要先安装aiomysql: `pip3 install aiomysql`
+- 默认主键字段`id`。最好配置自增。否则请使用`set_primary("my_id")`设置自己的id字段。*这是全局设置*，如果所有的表*各有各的主键*字段，本工具将不太好用。
 - 表名 与 模型类名 必须对应。模型类必须继承`Model`
 - `表列名`与`类字段名`必须对应。
 
@@ -27,6 +33,8 @@ CREATE TABLE `t_filter_rules` (
 类字段名与表列名相同
 
 ```python
+from lite_orm.orm import Model
+
 class t_filter_rules(Model):
     def _init_(self):
         self.id = 0
@@ -37,14 +45,15 @@ class t_filter_rules(Model):
 ```
 
 # 简单使用
+使用pip3安装，
 
-把orm.py**复制到你的项目中**，没做成pip安装方式，方便用户魔改和debug
+或者把orm.py**复制到你的项目中**，方便用户魔改和debug
 
 ## 创建数据库连接
 
 ```python
-from orm import eq, more, execute, first_or_none, in_it
-from orm import set_globle_db, Model
+from lite_orm.orm import eq, more, execute, first_or_none, in_it
+from lite_orm.orm import set_globle_db, Model
 
 loop = asyncio.get_event_loop()
 db = await aiomysql.create_pool(host=mysql_host, 
